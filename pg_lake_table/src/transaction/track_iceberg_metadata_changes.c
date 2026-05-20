@@ -444,10 +444,10 @@ IdentifierJson(const char *namespaceFlat, const char *tableName)
 
 	initStringInfo(&out);
 	appendStringInfoChar(&out, '{');
-	appendStringInfoString(&out, "\"namespace\":");
-	appendStringInfo(&out, "[\"%s\"]", namespaceFlat);
-	appendStringInfoString(&out, ",\"name\":");
-	appendStringInfo(&out, "\"%s\"", tableName);
+	appendStringInfoString(&out, "\"namespace\":[");
+	appendStringInfoString(&out, EscapeJson(namespaceFlat));
+	appendStringInfoString(&out, "],\"name\":");
+	appendStringInfoString(&out, EscapeJson(tableName));
 	appendStringInfoChar(&out, '}');
 	return out.data;
 }
