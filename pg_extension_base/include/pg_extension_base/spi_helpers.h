@@ -189,6 +189,34 @@
 	SPI_finish();
 
 /*
+ * SPI_START_EXTENSION_OWNER_ALLOWING_TEMP_OBJECTS is the temp-object-friendly
+ * variant of SPI_START_EXTENSION_OWNER.  It applies the same extension-owner
+ * identity switch and search_path = pg_catalog, pg_temp lockdown, but omits
+ * SECURITY_RESTRICTED_OPERATION so the enclosed SPI block may create temporary
+ * objects (CREATE TEMP TABLE, CREATE TEMP SEQUENCE, etc.).  PostgreSQL
+ * forbids creating temp objects under SECURITY_RESTRICTED_OPERATION because
+ * the temp namespace cannot be safely established within a restricted
+ * context.
+ *
+ * Use only around fixed, statically-known DDL with no caller-supplied values
+ * flowing into the SPI query: dropping the restricted-op flag re-permits
+ * SET / role-change side-effects, so the search_path lockdown is the only
+ * defense against hijack via the caller's environment.  Pair with SPI_END.
+ *
+ * Usage: SPI_START_EXTENSION_OWNER_ALLOWING_TEMP_OBJECTS(PgLakeTable)
+ */
+#define SPI_START_EXTENSION_OWNER_ALLOWING_TEMP_OBJECTS(Extension) \
+	SPI_START_VARS() \
+	GetUserIdAndSecContext(&_savedUserId, &_savedSecurityContext); \
+	SetUserIdAndSecContext(ExtensionOwnerId(Extension), \
+						   SECURITY_LOCAL_USERID_CHANGE); \
+	DISABLE_QUERY_TRACKING() \
+	(void) set_config_option("search_path", "pg_catalog, pg_temp", \
+							 PGC_SUSET, PGC_S_SESSION, \
+							 GUC_ACTION_SAVE, true, 0, false); \
+	SPI_connect();
+
+/*
  * BEGIN_EXTENSION_OWNER_CONTEXT / END_EXTENSION_OWNER_CONTEXT are the non-SPI
  * counterparts to SPI_START_EXTENSION_OWNER / SPI_END. Use them when running
  * direct PostgreSQL operations (DefineSequence, RemoveRelations, setval(),

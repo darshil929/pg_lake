@@ -55,6 +55,7 @@
 #include "catalog/namespace.h"
 #include "commands/defrem.h"
 #include "commands/tablecmds.h"
+#include "pg_extension_base/spi_helpers.h"
 #include "pg_lake/fdw/update_tracking.h"
 #include "pg_lake/util/item_pointer_utils.h"
 #include "executor/executor.h"
@@ -153,6 +154,17 @@ GetUpdateTableRangeVar(Oid relationId)
 /*
  * CreateUpdateTrackingTable creates a temporary table used for tracking
  * updated ctids.
+ *
+ * BeginRelationUpdateTracking runs from BeginForeignModify, which is reached
+ * for every UPDATE/DELETE on a pg_lake_table foreign table -- including
+ * UPDATE/DELETE issued from inside a SECURITY_RESTRICTED_OPERATION context
+ * such as SPI_START_EXTENSION_OWNER.  PostgreSQL forbids creating temporary
+ * objects under SECURITY_RESTRICTED_OPERATION, so we narrowly clear the flag
+ * around the DefineRelation + DefineIndex pair.  The relation/index
+ * parameters are derived from the target relation OID, not from
+ * caller-supplied SQL, so lifting the restricted-op flag does not reopen a
+ * hijack vector; the search_path lockdown set up by the surrounding SPI
+ * helper stays in effect.
  */
 static Oid
 CreateUpdateTrackingTable(RangeVar *updateTableName)
@@ -173,6 +185,18 @@ CreateUpdateTrackingTable(RangeVar *updateTableName)
 
 	column->is_not_null = true;
 	createTempTable->tableElts = list_make1(column);
+
+	/*
+	 * Clear SECURITY_RESTRICTED_OPERATION around the DefineRelation +
+	 * DefineIndex pair so the temp objects can be created.  See function
+	 * comment above for the rationale.
+	 */
+	Oid			savedUserId;
+	int			savedSecContext;
+
+	GetUserIdAndSecContext(&savedUserId, &savedSecContext);
+	SetUserIdAndSecContext(savedUserId,
+						   savedSecContext & ~SECURITY_RESTRICTED_OPERATION);
 
 	ObjectAddress updateTableAddress =
 		DefineRelation(createTempTable, RELKIND_RELATION, InvalidOid, NULL, "");
@@ -206,6 +230,8 @@ CreateUpdateTrackingTable(RangeVar *updateTableName)
 				 /* check_not_in_use */ false,
 				 /* skip_builds */ false,
 				 /* quiet */ true);
+
+	SetUserIdAndSecContext(savedUserId, savedSecContext);
 
 	CommandCounterIncrement();
 
