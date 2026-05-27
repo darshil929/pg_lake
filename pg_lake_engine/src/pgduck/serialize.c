@@ -127,6 +127,12 @@ char *
 PGDuckSerialize(FmgrInfo *flinfo, Oid columnType, Datum value,
 				CopyDataFormat format)
 {
+	/*
+	 * Unwrap domain types so that e.g. a domain-over-bytea is serialized with
+	 * the bytea-specific path rather than the generic text output path.
+	 */
+	columnType = ResolveDomainBaseType(columnType);
+
 	if (flinfo->fn_oid == ARRAY_OUT_OID)
 	{
 		/* maps are a type of array */
