@@ -765,8 +765,9 @@ pg_lake_iceberg_validator(PG_FUNCTION_ARGS)
 			char	   *icebergCatalogName = defGetString(def);
 
 			/*
-			 * We only accept "rest" and "postgres" for now. If not provided,
-			 * assume "postgres" by default. Don't allow anything.
+			 * We only accept "rest", "object_store" and "postgres". If not
+			 * provided, the postgres catalog is assumed by default (see
+			 * ProcessCreateIcebergTableFromForeignTableStmt).
 			 */
 			if (pg_strncasecmp(icebergCatalogName, REST_CATALOG_NAME, strlen(icebergCatalogName)) == 0)
 			{
@@ -793,7 +794,8 @@ pg_lake_iceberg_validator(PG_FUNCTION_ARGS)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						 errmsg("invalid catalog option: %s", icebergCatalogName),
-						 errdetail("Only " REST_CATALOG_NAME " and " POSTGRES_CATALOG_NAME " are supported for now.")));
+						 errdetail("Only " REST_CATALOG_NAME ", " OBJECT_STORE_CATALOG_NAME " and " POSTGRES_CATALOG_NAME
+								   " are supported for now.")));
 		}
 		else if (catalog == ForeignTableRelationId && strcmp(def->defname, "read_only") == 0)
 		{
@@ -908,50 +910,54 @@ pg_lake_iceberg_validator(PG_FUNCTION_ARGS)
 		!(icebergCatalogType == REST_CATALOG_READ_ONLY || icebergCatalogType == OBJECT_STORE_READ_ONLY))
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("\"read_only\" option is only valid for catalog=\"rest\"")));
+				 errmsg("\"read_only\" option is only valid for catalog=\"rest\" or catalog=\"object_store\"")));
 
 	if (catalog == ForeignTableRelationId)
 	{
 		if (icebergCatalogType == REST_CATALOG_READ_ONLY || icebergCatalogType == OBJECT_STORE_READ_ONLY)
 		{
 			/*
-			 * catalog_namespace, catalog_table_name and catalog_name is
-			 * required for catalog=rest
+			 * catalog_name, catalog_namespace, and catalog_table_name are
+			 * required for read-only external catalog tables, i.e.
+			 * catalog=rest and catalog=object_store.
+			 *
+			 * In practice these are always auto-populated by create_table.c,
+			 * but we check here as a safety net.
 			 */
 			if (!catalogName)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("\"catalog_name\" option is required for catalog=\"rest\"")));
+						 errmsg("\"catalog_name\" option is required for read-only rest and object_store catalog tables")));
 
-			if (!catalogNamespace && icebergCatalogType != OBJECT_STORE_READ_ONLY)
+			if (!catalogNamespace)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("\"catalog_namespace\" option is required for catalog=\"rest\"")));
+						 errmsg("\"catalog_namespace\" option is required for read-only rest and object_store catalog tables")));
 
 			if (!catalogTableName)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("\"catalog_table_name\" option is required for catalog=\"rest\"")));
+						 errmsg("\"catalog_table_name\" option is required for read-only rest and object_store catalog tables")));
 		}
 		else
 		{
 			/*
 			 * For other catalog types these options are not valid.
 			 */
+			if (catalogName)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("\"catalog_name\" option is only valid for read-only rest and object_store catalog tables")));
+
 			if (catalogNamespace)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("\"catalog_namespace\" option is only valid for writable catalog=\"rest\"")));
+						 errmsg("\"catalog_namespace\" option is only valid for read-only rest and object_store catalog tables")));
 
 			if (catalogTableName)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("\"catalog_table_name\" option is only valid for writable catalog=\"rest\"")));
-
-			if (catalogName)
-				ereport(ERROR,
-						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("\"catalog_name\" option is only valid for writable catalog=\"rest\"")));
+						 errmsg("\"catalog_table_name\" option is only valid for read-only rest and object_store catalog tables")));
 
 		}
 	}

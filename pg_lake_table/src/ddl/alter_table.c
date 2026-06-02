@@ -248,9 +248,9 @@ ProcessAlterTable(ProcessUtilityParams * processUtilityParams, void *arg)
 	}
 
 	/*
-	 * For read-only rest catalog iceberg tables, we only allow changing
-	 * catalog_table_name option. All other operations or any other DDLs are
-	 * disallowed.
+	 * For read-only rest and object_store catalog iceberg tables, we only
+	 * allow changing a subset of catalog options. All other operations or any
+	 * other DDLs are disallowed.
 	 */
 	if (HasOnlyCatalogAlterTableOptions(alterStmt))
 	{
@@ -271,8 +271,10 @@ ProcessAlterTable(ProcessUtilityParams * processUtilityParams, void *arg)
 		else if (icebergCatalogType == OBJECT_STORE_READ_ONLY)
 		{
 			/*
-			 * We currently only allow changing catalog_table_name option for
-			 * read-only rest catalog iceberg tables.
+			 * For read-only object_store catalog iceberg tables, the full
+			 * catalog identifier (catalog_name + catalog_namespace +
+			 * catalog_table_name) can be changed to re-point the table at a
+			 * different source.
 			 */
 			List	   *allowedOptions = list_make3("catalog_table_name", "catalog_namespace", "catalog_name");
 
