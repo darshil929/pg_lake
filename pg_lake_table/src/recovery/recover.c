@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Snowflake Inc.
+ * Copyright 2026 Snowflake Inc.
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,12 +19,12 @@
 #include "miscadmin.h"
 #include "fmgr.h"
 
-#include "access/heapam.h"
-#include "catalog/pg_database.h"
 #include "catalog/namespace.h"
 #include "pg_lake/extensions/pg_lake_iceberg.h"
 #include "pg_lake/extensions/pg_lake_table.h"
 #include "pg_lake/iceberg/catalog.h"
+#include "pg_lake/recovery/recover.h"
+#include "pg_lake/util/database_utils.h"
 #include "pg_extension_base/spi_helpers.h"
 #include "utils/builtins.h"
 
@@ -32,8 +32,9 @@
 PG_FUNCTION_INFO_V1(pg_lake_finish_postgres_recovery);
 PG_FUNCTION_INFO_V1(pg_lake_finish_postgres_recovery_in_db);
 
+PgLakeFinishPostgresRecoveryHookType PgLakeFinishPostgresRecoveryHook = NULL;
+
 static void RunAttachedCommand(char *command, char *databaseName);
-static List *GetDatabaseNameList(void);
 
 /*
  * pg_lake_finish_postgres_recovery is a function that runs
@@ -63,6 +64,9 @@ pg_lake_finish_postgres_recovery(PG_FUNCTION_ARGS)
 						 quote_literal_cstr("finish_postgres_recovery_in_db"));
 		RunAttachedCommand(command->data, databaseName);
 	}
+
+	if (PgLakeFinishPostgresRecoveryHook != NULL)
+		PgLakeFinishPostgresRecoveryHook();
 
 	PG_RETURN_VOID();
 }
@@ -107,36 +111,4 @@ pg_lake_finish_postgres_recovery_in_db(PG_FUNCTION_ARGS)
 	UpdateAllInternalIcebergTablesToReadOnly();
 
 	PG_RETURN_VOID();
-}
-
-
-/*
- * GetDatabaseList returns a list of all databases.
- */
-static List *
-GetDatabaseNameList(void)
-{
-	List	   *databaseList = NIL;
-	HeapTuple	databaseTuple;
-
-	Relation	pgDatabaseRelation = table_open(DatabaseRelationId, AccessShareLock);
-	TableScanDesc scan = table_beginscan_catalog(pgDatabaseRelation, 0, NULL);
-
-	while (HeapTupleIsValid(databaseTuple = heap_getnext(scan, ForwardScanDirection)))
-	{
-		Form_pg_database databaseRecord = (Form_pg_database) GETSTRUCT(databaseTuple);
-
-		/* if connection not possible, skip */
-		if (databaseRecord->datistemplate || !databaseRecord->datallowconn)
-			continue;
-
-		char	   *dbName = pstrdup(NameStr(databaseRecord->datname));
-
-		databaseList = lappend(databaseList, dbName);
-	}
-
-	table_endscan(scan);
-	table_close(pgDatabaseRelation, AccessShareLock);
-
-	return databaseList;
 }
