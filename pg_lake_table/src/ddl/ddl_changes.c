@@ -36,7 +36,9 @@
 #include "pg_lake/rest_catalog/rest_catalog.h"
 #include "pg_lake/transaction/track_iceberg_metadata_changes.h"
 #include "pg_lake/object_store_catalog/object_store_catalog.h"
+#include "pg_lake/util/rel_utils.h"
 
+#include "access/xact.h"
 #include "utils/timestamp.h"
 #include "utils/inval.h"
 
@@ -160,18 +162,46 @@ ApplyDDLCatalogChanges(Oid relationId, List *ddlOperations,
 				 * transaction are in in_progress files, so they'll be cleaned
 				 * up separately.
 				 */
-				if (!IsIcebergTableCreatedInCurrentTransaction(relationId))
+				bool		createdInCurrentTx =
+					IsIcebergTableCreatedInCurrentTransaction(relationId);
+
+				/*
+				 * When the caller enabled deferred cleanup (the
+				 * pg_lake_table.defer_drop_file_cleanup GUC), don't walk
+				 * object storage now: queue the table's metadata.json as a
+				 * single resolve_metadata row and let VACUUM resolve it into
+				 * the exact referenced files later. This stays file-accurate
+				 * (never a whole prefix), so it is safe for custom locations
+				 * too. A table created in this transaction has no persisted
+				 * metadata to resolve, so it takes the normal path.
+				 */
+				bool		deferMetadataResolution =
+					DeferDropFileCleanup &&
+					!createdInCurrentTx;
+
+				if (deferMetadataResolution)
+				{
+					char	   *metadataLocation =
+						GetIcebergMetadataLocation(relationId, true);
+
+					InsertMetadataResolveRecord(metadataLocation, InvalidOid,
+												GetCurrentTransactionStartTimestamp());
+				}
+				else if (!createdInCurrentTx)
+				{
 					TryMarkAllReferencedFilesForDeletion(relationId);
+				}
 
 				/*
 				 * previous_metadata location is a special file that is not
 				 * referenced by the iceberg metadata, but may not have been
 				 * deleted when the table was dropped. Normally, when a new
 				 * metadata file is written, the previous metadata file is
-				 * added to the deletion queue. However, here are not going to
-				 * create another metadata file, the table is dropped. So,
+				 * added to the deletion queue. However, here we are not going
+				 * to create another metadata file, the table is dropped. So,
 				 * this could be the only chance to delete the previous
-				 * metadata file.
+				 * metadata file. It is not covered by metadata resolution
+				 * either, so enqueue it directly on both paths.
 				 */
 				char	   *previousMetadataPath =
 					GetIcebergCatalogPreviousMetadataLocation(relationId, false);

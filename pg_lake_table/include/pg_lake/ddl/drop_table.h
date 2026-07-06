@@ -20,6 +20,7 @@
 #include "pg_lake/ddl/utility_hook.h"
 
 extern bool SkipDropAccessHook;
+extern bool DeferDropFileCleanup;
 
 extern void InitializeDropTableHandler(void);
 extern PGDLLEXPORT bool CheckIfTypeIsUsedInTables(Oid typeId, const char *tableSetSubquery);

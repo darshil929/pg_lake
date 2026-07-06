@@ -63,6 +63,15 @@
 /* controlled via GUC */
 bool		SkipDropAccessHook = false;
 
+/*
+ * pg_lake_table.defer_drop_file_cleanup GUC. When set, dropping a writable
+ * Iceberg table queues its metadata.json for VACUUM to resolve and delete
+ * later instead of enumerating referenced files during the drop -- callers
+ * turn it on around a bulk DROP to avoid the per-file walk exceeding the
+ * request timeout, without losing file-accurate deletion.
+ */
+bool		DeferDropFileCleanup = false;
+
 #define INTERNAL_ICEBERG_TABLES_SUBQUERY \
 	"SELECT c.oid AS relid " \
 	"FROM lake_iceberg.tables_internal tbl " \

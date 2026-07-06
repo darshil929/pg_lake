@@ -37,6 +37,7 @@
 #include "pg_lake/iceberg/catalog.h"
 #include "pg_lake/iceberg/operations/find_referenced_files.h"
 #include "pg_lake/util/array_utils.h"
+#include "pg_lake/util/injection_points.h"
 #include "pg_lake/util/s3_reader_utils.h"
 
 typedef struct FileHashEntry
@@ -64,6 +65,14 @@ Datum
 find_all_referenced_files(PG_FUNCTION_ARGS)
 {
 	char	   *metadataPath = text_to_cstring(PG_GETARG_TEXT_PP(0));
+
+	/*
+	 * Test hook: the deferred-drop VACUUM path invokes this SQL entrypoint
+	 * over SPI to resolve a queued metadata.json. A distinct name lets a test
+	 * force resolution to fail (and assert the row is retried) without also
+	 * arming the eager enumeration below.
+	 */
+	INJECTION_POINT_COMPAT("iceberg-find-referenced-files-udf");
 
 	HTAB	   *fileHash = CreateFilesHash();
 
@@ -366,6 +375,14 @@ FindUnreferencedFilesAmongHTABs(HTAB *prevReferencedFileHash, HTAB *currentRefer
 List *
 IcebergFindAllReferencedFiles(char *metadataPath)
 {
+	/*
+	 * Test hook: the eager, drop-time enumeration. A distinct name lets a
+	 * test force it to fail (so the drop falls back to queuing the storage
+	 * prefix, see test_injection_point_on_enumeration_path) independently of
+	 * the deferred resolution path.
+	 */
+	INJECTION_POINT_COMPAT("iceberg-find-referenced-files");
+
 	HTAB	   *fileHash = CreateFilesHash();
 
 	IcebergMetadataAddAllReferencedFiles(metadataPath, fileHash);

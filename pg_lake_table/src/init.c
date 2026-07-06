@@ -348,6 +348,20 @@ _PG_init(void)
 							 GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE,
 							 NULL, NULL, NULL);
 
+	DefineCustomBoolVariable("pg_lake_table.defer_drop_file_cleanup",
+							 "When dropping a writable, default-location Iceberg "
+							 "table, queue its metadata.json for VACUUM to resolve "
+							 "and delete later, instead of enumerating every "
+							 "referenced file from object storage during the drop. "
+							 "Lets callers avoid the per-file walk exceeding the "
+							 "request timeout during a bulk drop.",
+							 NULL,
+							 &DeferDropFileCleanup,
+							 false,
+							 PGC_USERSET,
+							 GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE,
+							 NULL, NULL, NULL);
+
 	DefineCustomIntVariable("pg_lake_table.unbounded_numeric_default_precision",
 							"Determines the default precision for unbounded numeric types "
 							"in pg_lake tables.",
