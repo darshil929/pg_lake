@@ -870,6 +870,70 @@ GetTableSizeFromCatalog(Oid relationId)
 
 
 /*
+ * GetTableFileStatsFromCatalog reports, in a single pass over the data files
+ * catalog, the total size in bytes, the number of files, and the number of
+ * live rows currently in the table.  Live rows are counted over data files
+ * only (content = CONTENT_DATA) and exclude rows covered by position deletes;
+ * size and file count cover all files, matching GetTableSizeFromCatalog.
+ *
+ * Empty tables report zero for every field.  Callers must confirm the
+ * relation ID belongs to an actual writable table.
+ */
+void
+GetTableFileStatsFromCatalog(Oid relationId, int64 *tableSize,
+							 int64 *fileCount, int64 *liveRowCount)
+{
+	*tableSize = 0;
+	*fileCount = 0;
+	*liveRowCount = 0;
+
+	/* cast sum/count results to bigint to avoid returning numeric */
+	char	   *metadataQuery =
+		psprintf("select "
+				  /* 1 */ "sum(file_size)::bigint, "
+				  /* 2 */ "count(*)::bigint, "
+				  /* 3 */ "(sum(row_count - deleted_row_count) "
+				 "filter (where content OPERATOR(pg_catalog.=) %d))::bigint "
+				 "from " DATA_FILES_TABLE_QUALIFIED " "
+				 "where table_name OPERATOR(pg_catalog.=) $1",
+				 (int) CONTENT_DATA);
+
+	DECLARE_SPI_ARGS(1);
+	SPI_ARG_VALUE(1, OIDOID, relationId, false);
+
+	/* switch to schema owner, we assume callers checked permissions */
+	SPI_START_EXTENSION_OWNER(PgLakeTable);
+
+	bool		readOnly = true;
+
+	SPI_EXECUTE(metadataQuery, readOnly);
+
+	if (SPI_processed == 1)
+	{
+		bool		rowIndex = 0;
+		bool		isNull = false;
+
+		Datum		tableSizeDatum = GET_SPI_DATUM(rowIndex, 1, &isNull);
+
+		if (!isNull)
+			*tableSize = DatumGetInt64(tableSizeDatum);
+
+		Datum		fileCountDatum = GET_SPI_DATUM(rowIndex, 2, &isNull);
+
+		if (!isNull)
+			*fileCount = DatumGetInt64(fileCountDatum);
+
+		Datum		liveRowCountDatum = GET_SPI_DATUM(rowIndex, 3, &isNull);
+
+		if (!isNull)
+			*liveRowCount = DatumGetInt64(liveRowCountDatum);
+	}
+
+	SPI_END();
+}
+
+
+/*
  * GetTotalDeletedRowCountFromCatalog sums the deleted_row_count of all data
  * files in the table.  This is the total number of rows that are currently
  * covered by position delete files.
